@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "simpleworlddownloader-addon",
+  "version": "${version}",
+  "name": "Simple World Downloader Addon",
+  "description": "Client-side mixin addon to bypass Anti-World-Download obfuscation via chunk packet interception",
+  "authors": [
+    "SimpleWorldDownloader Contributors"
+  ],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/simpleworlddownloader/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "main": [
+      "com.simpleworlddownloader.mixin.SimpleWorldDownloaderAddon"
+    ]
+  },
+  "mixins": [
+    "simpleworlddownloader.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "minecraft": "1.21.1"
+  }
+}

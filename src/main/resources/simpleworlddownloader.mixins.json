@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.simpleworlddownloader.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [],
+  "client": [
+    "ClientPlayNetworkHandlerMixin",
+    "ChunkPacketDetectorMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
