@@ -1,134 +1,87 @@
 package com.simpleworlddownloader.mixin;
 
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.world.chunk.WorldChunk;
-import net.minecraft.util.math.ChunkPos;
+import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.client.world.ClientWorld;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.chunk.WorldChunk;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
+import java.util.HashSet;
+import java.util.Set;
 
 /**
- * Supplementary mixin for ClientWorld chunk loading events.
- * Monitors chunks as they are loaded/unloaded to detect obfuscation patterns
- * and cache original block data when possible.
- * 
- * Yarn mappings for 1.21.1:
- * - ClientWorld.addChunk()
- * - ClientWorld.removeChunk()
+ * Detects only obviously generated stone-noise chunks and does not flag normal terrain.
  */
 @Mixin(ClientWorld.class)
 public abstract class ChunkPacketDetectorMixin {
     private static final Logger LOGGER = LoggerFactory.getLogger("SWD-ChunkDetector");
-    
-    private static final int OBFUSCATION_THRESHOLD_PERCENT = 80;
 
-    /**
-     * Monitor chunk additions to detect obfuscation at load time.
-     */
-    @Inject(
-        method = "addChunk",
-        at = @At("TAIL")
-    )
+    // Only treat a chunk as noise if it is effectively a uniform stone blanket.
+    // This avoids false positives on normal caves, stone biomes, and regular terrain.
+    private static final double STONE_NOISE_RATIO = 0.95D;
+    private static final int MIN_NON_AIR_BLOCKS = 512;
+    private static final int MAX_UNIQUE_BLOCK_TYPES = 4;
+
+    @Inject(method = "addChunk", at = @At("TAIL"))
     private void onChunkAdded(WorldChunk chunk, CallbackInfo ci) {
         try {
-            analyzeChunkObfuscation(chunk);
+            if (isStoneNoiseChunk(chunk)) {
+                LOGGER.warn("[SWD] Detected stone-noise chunk {} - excluding from visual pass", chunk.getPos());
+            }
         } catch (Exception e) {
             LOGGER.debug("Error analyzing chunk on add", e);
         }
     }
 
-    /**
-     * Analyze a chunk for obfuscation patterns.
-     * Logs warnings if high stone density is detected.
-     */
-    private void analyzeChunkObfuscation(WorldChunk chunk) {
+    private boolean isStoneNoiseChunk(WorldChunk chunk) {
         ChunkPos pos = chunk.getPos();
-        
-        int totalBlocks = 0;
-        int stoneBlocks = 0;
-        
-        // Scan all blocks in the chunk
+        int totalNonAir = 0;
+        int stoneLike = 0;
+        Set<Block> uniqueBlocks = new HashSet<>();
+
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
                 for (int y = chunk.getBottomY(); y < chunk.getTopY(); y++) {
-                    var blockState = chunk.getBlockState(
-                        pos.getStartX() + x,
-                        y,
-                        pos.getStartZ() + z
-                    );
-                    
-                    // Skip air blocks
-                    if (blockState.isAir()) {
+                    var state = chunk.getBlockState(pos.getStartX() + x, y, pos.getStartZ() + z);
+                    if (state.isAir()) {
                         continue;
                     }
-                    
-                    totalBlocks++;
-                    
-                    // Count stone variants
-                    if (isObfuscationBlock(blockState.getBlock())) {
-                        stoneBlocks++;
+
+                    totalNonAir++;
+                    Block block = state.getBlock();
+                    uniqueBlocks.add(block);
+
+                    if (isNoiseBlock(block)) {
+                        stoneLike++;
                     }
                 }
             }
         }
-        
-        // Calculate density
-        if (totalBlocks > 0) {
-            double density = (double) stoneBlocks / totalBlocks * 100;
-            
-            if (density >= OBFUSCATION_THRESHOLD_PERCENT) {
-                LOGGER.warn(
-                    "[SWD] Chunk {} loaded with suspicious {}% stone density",
-                    pos,
-                    String.format("%.1f", density)
-                );
-                logChunkDetails(chunk, pos);
-            }
+
+        if (totalNonAir < MIN_NON_AIR_BLOCKS) {
+            return false;
         }
+
+        double ratio = (double) stoneLike / totalNonAir;
+        boolean uniform = uniqueBlocks.size() <= MAX_UNIQUE_BLOCK_TYPES;
+
+        // A normal terrain chunk is usually not almost entirely stone, and it has more varied blocks.
+        return ratio >= STONE_NOISE_RATIO && uniform;
     }
 
-    /**
-     * Identifies blocks commonly used for obfuscation.
-     */
-    private boolean isObfuscationBlock(var block) {
-        return block == Blocks.STONE ||
-               block == Blocks.COBBLESTONE ||
-               block == Blocks.DEEPSLATE ||
-               block == Blocks.GRANITE ||
-               block == Blocks.DIORITE ||
-               block == Blocks.ANDESITE ||
-               block == Blocks.GRAVEL;
-    }
-
-    /**
-     * Logs detailed chunk information for debugging.
-     */
-    private void logChunkDetails(WorldChunk chunk, ChunkPos pos) {
-        int minY = chunk.getBottomY();
-        int maxY = chunk.getTopY();
-        
-        LOGGER.info(
-            "[SWD] Chunk {} - Y range: {} to {} (height: {})",
-            pos,
-            minY,
-            maxY,
-            maxY - minY
-        );
-        
-        // Sample a few block types for logging
-        var sampleBlockState = chunk.getBlockState(
-            pos.getCenterX(),
-            (minY + maxY) / 2,
-            pos.getCenterZ()
-        );
-        
-        LOGGER.debug(
-            "[SWD] Sample block at chunk center: {}",
-            sampleBlockState.getBlock().toString()
-        );
+    private boolean isNoiseBlock(Block block) {
+        return block == Blocks.STONE
+            || block == Blocks.COBBLESTONE
+            || block == Blocks.DEEPSLATE
+            || block == Blocks.GRANITE
+            || block == Blocks.DIORITE
+            || block == Blocks.ANDESITE
+            || block == Blocks.GRAVEL;
     }
 }
